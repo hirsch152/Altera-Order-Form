@@ -31,6 +31,8 @@ import { initAuth, googleSignIn, getAccessToken, logout } from './firebaseAuth';
 import { createGoogleSheet, syncSubmissionsToSheet } from './googleSheets';
 
 export default function App() {
+  const isAdmin = false;
+
   // App States
   const [submissions, setSubmissions] = useState<ApparelSubmission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
@@ -294,15 +296,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsAdminOpen(true)}
-              className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold tracking-wide transition-all shadow-sm hover:shadow active:scale-95"
-              id="admin-dashboard-toggle-btn"
-            >
-              <Database className="w-3.5 h-3.5" />
-              <span>Admin Dashboard</span>
-              <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-400 group-hover:scale-125 transition-transform" />
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setIsAdminOpen(true)}
+                className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold tracking-wide transition-all shadow-sm hover:shadow active:scale-95"
+                id="admin-dashboard-toggle-btn"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Admin Dashboard</span>
+                <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-400 group-hover:scale-125 transition-transform" />
+              </button>
+            )}
           </div>
         </div>
       </header>
