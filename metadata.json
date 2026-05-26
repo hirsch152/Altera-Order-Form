@@ -1,0 +1,6 @@
+{
+  "name": "Altera Apparel Portal",
+  "description": "An elegant corporate portal for Altera employees to choose their promotional polo shirt or hoodie, linked directly to a master Google Sheet for order tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
