@@ -33,6 +33,34 @@ import { createGoogleSheet, syncSubmissionsToSheet } from './googleSheets';
 export default function App() {
   const isAdmin = false;
 
+  // Gateway state definitions for Altera employee verification
+  const [gatewayVerified, setGatewayVerified] = useState<boolean>(() => {
+    return localStorage.getItem('altera_gateway_verified') === 'true';
+  });
+  const [gatewayEmail, setGatewayEmail] = useState('');
+  const [gatewayError, setGatewayError] = useState<string | null>(null);
+
+  const handleGatewaySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setGatewayError(null);
+    const emailLower = gatewayEmail.trim().toLowerCase();
+    
+    if (!emailLower) {
+      setGatewayError('Please enter your corporate email address.');
+      return;
+    }
+    
+    // Check if the email ends with '@altera.com'
+    if (emailLower.endsWith('@altera.com')) {
+      localStorage.setItem('altera_gateway_verified', 'true');
+      setGatewayVerified(true);
+      // Pre-fill the form submission email for convenience
+      setEmail(emailLower);
+    } else {
+      setGatewayError('Access restricted to Altera corporate email addresses.');
+    }
+  };
+
   // App States
   const [submissions, setSubmissions] = useState<ApparelSubmission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
@@ -275,6 +303,107 @@ export default function App() {
 
     return matchesSearch && matchesItem && matchesSize;
   });
+
+  if (!gatewayVerified) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-slate-900 selection:text-white flex flex-col justify-between py-12 px-4 relative overflow-hidden">
+        {/* Background ambient subtle visual circles */}
+        <div className="absolute top-0 right-0 w-[45rem] h-[45rem] bg-gradient-to-b from-blue-10 to-transparent blur-3xl opacity-50 pointer-events-none -mr-96 -mt-96" />
+        <div className="absolute bottom-0 left-0 w-[45rem] h-[45rem] bg-gradient-to-t from-sky-5 to-transparent blur-3xl opacity-50 pointer-events-none -ml-96 -mb-96" />
+
+        <div className="h-10" />
+
+        <div className="max-w-md w-full mx-auto relative z-10 my-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+            className="bg-white/80 backdrop-blur-xl rounded-3xl p-8 sm:p-10 border border-slate-200/60 shadow-xl space-y-8"
+          >
+            {/* Altera Logo & Title */}
+            <div className="text-center space-y-4">
+              <motion.div
+                initial={{ scale: 0.95 }}
+                animate={{ scale: 1 }}
+                className="inline-block"
+              >
+                <img
+                  src="https://user.fm/files/v2-a11f3f584f9b496d1b50f34963c37eb5/Altera%20Logo.png"
+                  alt="Altera Logo"
+                  referrerPolicy="no-referrer"
+                  className="h-9 w-auto mx-auto object-contain"
+                  id="gateway-logo"
+                />
+              </motion.div>
+              <div className="space-y-1.5">
+                <h2 className="font-display font-bold text-2xl tracking-tight text-slate-950">
+                  Employee Verification
+                </h2>
+                <p className="text-xs text-slate-400 font-light leading-relaxed max-w-[280px] mx-auto">
+                  Please enter your corporate email to access the exclusive employee apparel portal.
+                </p>
+              </div>
+            </div>
+
+            {/* Email form */}
+            <form onSubmit={handleGatewaySubmit} className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="gateway-email-input" className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 pl-0.5">
+                  <Mail className="w-3.5 h-3.5 text-slate-400" /> Corporate Email
+                </label>
+                <input
+                  id="gateway-email-input"
+                  type="email"
+                  required
+                  placeholder="name@altera.com"
+                  value={gatewayEmail}
+                  onChange={(e) => {
+                    setGatewayEmail(e.target.value);
+                    if (gatewayError) setGatewayError(null);
+                  }}
+                  className={`w-full px-4 py-3.5 bg-slate-50 border rounded-xl focus:outline-none focus:bg-white focus:ring-1 transition-all font-sans text-sm placeholder:text-slate-400 ${
+                    gatewayError
+                      ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
+                      : 'border-slate-200 focus:border-slate-900 focus:ring-slate-900'
+                  }`}
+                />
+              </div>
+
+              {/* Polite Error Messages */}
+              <AnimatePresence mode="wait">
+                {gatewayError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    className="text-xs text-rose-600 font-medium pl-0.5"
+                    id="gateway-error-msg"
+                  >
+                    {gatewayError}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Enter Button */}
+              <button
+                type="submit"
+                className="w-full h-12 rounded-xl bg-slate-900 hover:bg-slate-850 text-white font-semibold text-sm tracking-wide transition-all shadow-lg shadow-slate-900/10 hover:scale-[1.01] active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer mt-6"
+                id="gateway-enter-btn"
+              >
+                <span>Enter Portal</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </form>
+          </motion.div>
+        </div>
+
+        {/* Footer */}
+        <div className="text-center text-[10px] text-slate-400 font-light z-10">
+          Altera Corp &copy; 2026. All rights reserved.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-slate-900 selection:text-white">
