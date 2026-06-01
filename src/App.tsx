@@ -23,15 +23,40 @@ import {
   Sliders,
   History,
   X,
-  Maximize2
+  Maximize2,
+  Settings
 } from 'lucide-react';
 
 import { ApparelSubmission } from './types';
 import { initAuth, googleSignIn, getAccessToken, logout } from './firebaseAuth';
 import { createGoogleSheet, syncSubmissionsToSheet } from './googleSheets';
 
+const DEFAULT_GOOGLE_SCRIPT_URL = '[PASTE YOUR COPIED WEB APP URL HERE]';
+
 export default function App() {
   const isAdmin = false;
+
+  // Google Apps Script Web App Config
+  const [googleScriptUrl, setGoogleScriptUrl] = useState<string>(() => {
+    const stored = localStorage.getItem('altera_google_script_url');
+    // Prefer env variable first, then custom stored, then default placeholder
+    return (import.meta as any).env.VITE_GOOGLE_SCRIPT_URL || stored || DEFAULT_GOOGLE_SCRIPT_URL;
+  });
+  const [isScriptConfigOpen, setIsScriptConfigOpen] = useState(false);
+  const [tempScriptUrl, setTempScriptUrl] = useState(googleScriptUrl);
+
+  // Toast Notification State
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+
+  // Auto-clear toast
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 5500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Gateway state definitions for Altera employee verification
   const [gatewayVerified, setGatewayVerified] = useState<boolean>(() => {
@@ -148,6 +173,40 @@ export default function App() {
     if (!finalCampus) return;
 
     setIsSubmitting(true);
+    let appsScriptSynced = false;
+    let appsScriptError = null;
+
+    const payload = {
+      fullName: name.trim(),
+      email: email.trim().toLowerCase(),
+      location: finalCampus,
+      garmentType: selectedItem,
+      size: selectedSize
+    };
+
+    const cleanUrl = googleScriptUrl.trim();
+    const isPlaceholder = !cleanUrl || cleanUrl === DEFAULT_GOOGLE_SCRIPT_URL;
+
+    // 1. Submit to Google Apps Script Web App URL if configured
+    if (!isPlaceholder && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
+      try {
+        // We use text/plain for the POST to fully bypass CORS pre-flight prechecks which usually fail in Google Web Apps
+        await fetch(cleanUrl, {
+          method: 'POST',
+          mode: 'no-cors', // Ensures the request is transmitted even if standard CORS headers aren't sent back by Apps Script
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
+          },
+          body: JSON.stringify(payload)
+        });
+        appsScriptSynced = true;
+      } catch (err: any) {
+        console.error('Apps Script submission error:', err);
+        appsScriptError = err.message || 'CORS or Network issue streaming to Sheets';
+      }
+    }
+
+    // 2. Process locally to maintain administrative dashboard and show success screen
     try {
       const res = await fetch('/api/submissions', {
         method: 'POST',
@@ -165,7 +224,26 @@ export default function App() {
         const data = await res.json();
         setSubmittedChoice(data.submission);
         fetchSubmissions();
-        // Reset form
+
+        // Inform user with highly communicative sleek toast notifications
+        if (appsScriptSynced) {
+          setToast({
+            message: '🎉 Specs captured! Successfully streamed to Google Sheets.',
+            type: 'success'
+          });
+        } else if (isPlaceholder) {
+          setToast({
+            message: '📝 Form recorded in database! (Paste Web App URL in settings to live-stream Google Sheets)',
+            type: 'info'
+          });
+        } else {
+          setToast({
+            message: `⚠️ Order recorded locally. Web App sync failed: ${appsScriptError || 'Internal Redirect'}`,
+            type: 'error'
+          });
+        }
+
+        // Reset form inputs
         setName('');
         setEmail('');
         setCampus('');
@@ -173,11 +251,11 @@ export default function App() {
         setSelectedItem(null);
         setSelectedSize(null);
       } else {
-        alert('Failed to submit. Please try again.');
+        alert('Failed to log submission. Please try again.');
       }
     } catch (err) {
-      console.error('Submission error:', err);
-      alert('An error occurred. Please check your network connection.');
+      console.error('Local database insertion failed:', err);
+      alert('An error occurred. Please check your connection.');
     } finally {
       setIsSubmitting(false);
     }
@@ -826,10 +904,22 @@ export default function App() {
             <span className="text-[10px] text-slate-400 tracking-wider uppercase font-medium">Altera Corp &copy; 2026</span>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
+            <button
+              onClick={() => {
+                setTempScriptUrl(googleScriptUrl);
+                setIsScriptConfigOpen(true);
+              }}
+              className="text-xs text-slate-400 hover:text-slate-900 transition-colors flex items-center gap-1 cursor-pointer font-medium"
+              id="google-script-settings-btn"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Google Sheet Script</span>
+            </button>
+            <span className="h-3 w-px bg-slate-200" />
             <button
               onClick={() => setIsAdminOpen(true)}
-              className="text-xs text-slate-400 hover:text-slate-900 transition-colors flex items-center gap-1 cursor-pointer"
+              className="text-xs text-slate-400 hover:text-slate-900 transition-colors flex items-center gap-1 cursor-pointer font-medium"
             >
               <Lock className="w-3 h-3" /> Management Console
             </button>
@@ -1294,6 +1384,168 @@ export default function App() {
               </motion.div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Google Apps Script Web App Configuration Modal */}
+      <AnimatePresence>
+        {isScriptConfigOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.4 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsScriptConfigOpen(false)}
+              className="fixed inset-0 bg-slate-950 z-[110] backdrop-blur-xs"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed inset-x-4 bottom-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 bg-white rounded-3xl overflow-hidden shadow-2xl max-w-lg w-full sm:w-[500px] z-[120] border border-slate-100 flex flex-col"
+              id="script-config-modal-panel"
+            >
+              {/* Header */}
+              <div className="bg-slate-50 p-6 flex flex-col items-center justify-center border-b border-slate-100 relative">
+                <button
+                  type="button"
+                  onClick={() => setIsScriptConfigOpen(false)}
+                  className="absolute top-4 right-4 p-1.5 bg-slate-200/50 hover:bg-slate-200 text-slate-500 hover:text-slate-900 rounded-full transition-all cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3 shadow-inner">
+                  <FileSpreadsheet className="w-6 h-6" />
+                </div>
+                <h4 className="font-display font-bold text-lg text-slate-950">Google Sheets Connection</h4>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Apps Script Web App Integration</p>
+              </div>
+
+              {/* Instructions and body */}
+              <div className="p-6 space-y-5 text-slate-600 text-xs">
+                <div className="space-y-2 leading-relaxed bg-slate-50/70 p-4 rounded-xl border border-slate-150/50">
+                  <p className="font-semibold text-slate-800">💡 Custom spreadsheet synchronization:</p>
+                  <p>
+                    By deploying a Google Apps Script Web App with a <code className="bg-slate-200 px-1 py-0.5 rounded font-mono text-[11px] text-indigo-700">doPost(e)</code> method accepting <code className="bg-slate-200 px-1 py-0.5 rounded font-mono text-[11px] text-indigo-700">fullName, email, location, garmentType, size</code>, you can feed entries inside your Sheets in real-time.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="script-url-input-field" className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Deployed Web App URL
+                  </label>
+                  <input
+                    id="script-url-input-field"
+                    type="url"
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    value={tempScriptUrl}
+                    onChange={(e) => setTempScriptUrl(e.target.value)}
+                    className="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-slate-950 focus:ring-1 focus:ring-slate-950 transition-all font-mono font-light text-[11px] text-slate-800"
+                  />
+                  {tempScriptUrl && tempScriptUrl !== DEFAULT_GOOGLE_SCRIPT_URL && !tempScriptUrl.startsWith('https://script.google.com') && (
+                    <p className="text-[10px] text-amber-600 font-medium">
+                      ⚠️ Note: Google Apps Script Web App URLs generally start with <code className="font-mono">https://script.google.com/</code>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="p-5 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('altera_google_script_url');
+                    setGoogleScriptUrl(DEFAULT_GOOGLE_SCRIPT_URL);
+                    setTempScriptUrl(DEFAULT_GOOGLE_SCRIPT_URL);
+                    setIsScriptConfigOpen(false);
+                    setToast({
+                      message: 'Reset script link to original defaults.',
+                      type: 'info'
+                    });
+                  }}
+                  className="px-4 py-2 hover:bg-slate-200 text-slate-505 rounded-xl text-xs font-semibold hover:text-slate-900 transition-all cursor-pointer"
+                >
+                  Reset Default
+                </button>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsScriptConfigOpen(false)}
+                    className="px-4 py-2 text-slate-500 hover:text-slate-900 text-xs font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = tempScriptUrl.trim();
+                      localStorage.setItem('altera_google_script_url', clean);
+                      setGoogleScriptUrl(clean);
+                      setIsScriptConfigOpen(false);
+                      setToast({
+                        message: '✅ Saved Sheet Web App connection URL successfully!',
+                        type: 'success'
+                      });
+                    }}
+                    className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold cursor-pointer shadow-md active:scale-95 transition-all"
+                  >
+                    Save connection
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Interactive Toast Alert Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+            className="fixed top-6 right-6 z-[200] max-w-sm w-full bg-white rounded-2xl shadow-xl border border-slate-150/80 p-4.5 flex gap-3 items-start pointer-events-auto"
+            id="global-toast-alert"
+          >
+            <div className={`mt-0.5 p-1 rounded-lg ${
+              toast.type === 'success'
+                ? 'bg-emerald-50 text-emerald-600'
+                : toast.type === 'error'
+                ? 'bg-rose-50 text-rose-600'
+                : 'bg-indigo-50 text-indigo-600'
+            }`}>
+              {toast.type === 'success' ? (
+                <Check className="w-4 h-4" />
+              ) : toast.type === 'error' ? (
+                <X className="w-4 h-4" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4" />
+              )}
+            </div>
+
+            <div className="flex-1 space-y-1">
+              <p className="text-slate-800 text-xs font-medium leading-relaxed">
+                {toast.message}
+              </p>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[9px] uppercase tracking-wider font-bold text-slate-350">
+                  {toast.type === 'success' ? 'Synchronized' : toast.type === 'error' ? 'Sync alert' : 'Configuration'}
+                </span>
+                <button
+                  onClick={() => setToast(null)}
+                  className="text-[10px] text-slate-400 hover:text-slate-950 font-semibold cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
