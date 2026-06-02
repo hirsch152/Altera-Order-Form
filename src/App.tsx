@@ -106,6 +106,12 @@ export default function App() {
 
   // Admin Panel States
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isAdminPortalOpen, setIsAdminPortalOpen] = useState(false);
+  const [portalSearch, setPortalSearch] = useState('');
+  const [selectedPortalSubmissionIds, setSelectedPortalSubmissionIds] = useState<string[]>([]);
+  const [showPortalAuth, setShowPortalAuth] = useState(false);
+  const [portalPasscode, setPortalPasscode] = useState('');
+  const [portalAuthError, setPortalAuthError] = useState(false);
   const [adminUser, setAdminUser] = useState<any>(null);
   const [adminToken, setAdminToken] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -133,17 +139,38 @@ export default function App() {
     'Other Location'
   ];
 
-  // Fetch submissions from local Express server
+  // Fetch submissions from local Express server with local storage synchronizing cache
   const fetchSubmissions = async () => {
     try {
       setLoadingSubmissions(true);
       const res = await fetch('/api/submissions');
       if (res.ok) {
         const data = await res.json();
-        setSubmissions(data.submissions || []);
+        const list = data.submissions || [];
+        setSubmissions(list);
+        try {
+          localStorage.setItem('altera_submissions_cache', JSON.stringify(list));
+        } catch (storageErr) {
+          console.warn('Failed to cache submissions:', storageErr);
+        }
+      } else {
+        // Fallback to cache in localStorage
+        const cached = localStorage.getItem('altera_submissions_cache');
+        if (cached) {
+          setSubmissions(JSON.parse(cached));
+        }
       }
     } catch (err) {
       console.error('Failed to fetch submissions:', err);
+      // Fallback to cache in localStorage
+      const cached = localStorage.getItem('altera_submissions_cache');
+      if (cached) {
+        try {
+          setSubmissions(JSON.parse(cached));
+        } catch {
+          // ignore parsing issues
+        }
+      }
     } finally {
       setLoadingSubmissions(false);
     }
@@ -190,14 +217,21 @@ export default function App() {
     // 1. Submit to Google Apps Script Web App URL if configured
     if (!isPlaceholder && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))) {
       try {
-        // We use text/plain for the POST to fully bypass CORS pre-flight prechecks which usually fail in Google Web Apps
+        // We use URLSearchParams to populate standard Google Apps Script e.parameter fields (e.parameter.fullName, e.parameter.email, etc.)
+        const formParams = new URLSearchParams();
+        formParams.append('fullName', name.trim());
+        formParams.append('email', email.trim().toLowerCase());
+        formParams.append('location', finalCampus);
+        formParams.append('garmentType', selectedItem);
+        formParams.append('size', selectedSize);
+
         await fetch(cleanUrl, {
           method: 'POST',
           mode: 'no-cors', // Ensures the request is transmitted even if standard CORS headers aren't sent back by Apps Script
           headers: {
-            'Content-Type': 'text/plain;charset=utf-8'
+            'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
           },
-          body: JSON.stringify(payload)
+          body: formParams.toString()
         });
         appsScriptSynced = true;
       } catch (err: any) {
@@ -330,31 +364,38 @@ export default function App() {
     }
   };
 
-  const handleDeleteSubmission = async (id: string) => {
+  const handleDeleteSubmission = (id: string) => {
     const confirmDelete = window.confirm('Are you sure you want to remove this employee entry?');
     if (!confirmDelete) return;
 
     try {
-      const res = await fetch(`/api/submissions/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        fetchSubmissions();
-      }
+      const updatedSubmissions = submissions.filter(sub => sub.id !== id);
+      localStorage.setItem('altera_submissions_cache', JSON.stringify(updatedSubmissions));
+      setSubmissions(updatedSubmissions);
+      setSelectedPortalSubmissionIds(prev => prev.filter(selId => selId !== id));
+      setToast({
+        message: 'Submission has been permanently deleted.',
+        type: 'success'
+      });
     } catch (err) {
       console.error('Delete error:', err);
     }
   };
 
-  const handleClearAll = async () => {
+  const handleClearAll = () => {
     const confirmClear = window.confirm(
       'CRITICAL: Are you sure you want to permanently delete ALL local submissions? This cannot be undone.'
     );
     if (!confirmClear) return;
 
     try {
-      const res = await fetch('/api/submissions', { method: 'DELETE' });
-      if (res.ok) {
-        setSubmissions([]);
-      }
+      localStorage.setItem('altera_submissions_cache', JSON.stringify([]));
+      setSubmissions([]);
+      setSelectedPortalSubmissionIds([]);
+      setToast({
+        message: 'All local submissions have been cleared.',
+        type: 'success'
+      });
     } catch (err) {
       console.error('Clear error:', err);
     }
@@ -381,6 +422,116 @@ export default function App() {
 
     return matchesSearch && matchesItem && matchesSize;
   });
+
+  const handleAdminPortalClick = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+    }
+    setShowPortalAuth(prev => !prev);
+    setPortalPasscode('');
+    setPortalAuthError(false);
+  };
+
+  const handlePortalSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (portalPasscode === "Hirsch1920") {
+      setIsAdminPortalOpen(true);
+      setShowPortalAuth(false);
+      setPortalPasscode('');
+      setPortalAuthError(false);
+      fetchSubmissions();
+    } else {
+      setPortalAuthError(true);
+    }
+  };
+
+  const exportToCSV = () => {
+    if (submissions.length === 0) {
+      alert("No submissions to export.");
+      return;
+    }
+    const headers = ["ID", "Name", "Email", "Campus/Location", "Item Choice", "Size", "Timestamp"];
+    const rows = submissions.map(sub => [
+      sub.id,
+      sub.name,
+      sub.email,
+      sub.campus,
+      sub.item,
+      sub.size,
+      sub.timestamp
+    ]);
+    const csvRows = [headers.join(",")];
+    for (const row of rows) {
+      csvRows.push(row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","));
+    }
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `altera_submissions_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDeleteSelectedPortal = async () => {
+    if (selectedPortalSubmissionIds.length === 0) return;
+
+    const confirmMessage = `Are you sure you want to permanently delete the ${selectedPortalSubmissionIds.length} selected submission(s)? This action cannot be undone.`;
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      // 1. LOCAL STORAGE PURGE: Filter current submissions
+      const updatedSubmissions = submissions.filter(sub => !selectedPortalSubmissionIds.includes(sub.id));
+
+      // 2. CACHE SYNC: Save back into localStorage with the cache key
+      localStorage.setItem('altera_submissions_cache', JSON.stringify(updatedSubmissions));
+
+      // 3. INSTANT REFRESH: Update React state and reset selections instantly
+      setSubmissions(updatedSubmissions);
+      setSelectedPortalSubmissionIds([]);
+
+      setToast({
+        message: 'Selected submissions have been permanently deleted.',
+        type: 'success'
+      });
+
+    } catch (err) {
+      console.error('Failed to perform bulk delete:', err);
+      alert('An error occurred during deletion.');
+    }
+  };
+
+  const handleDeleteSinglePortal = (id: string) => {
+    const confirmMessage = `Are you sure you want to permanently delete this submission? This action cannot be undone.`;
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      // 1. LOCAL STORAGE PURGE: Filter current submissions
+      const updatedSubmissions = submissions.filter(sub => sub.id !== id);
+
+      // 2. CACHE SYNC: Save back into localStorage with the cache key
+      localStorage.setItem('altera_submissions_cache', JSON.stringify(updatedSubmissions));
+
+      // 3. INSTANT REFRESH: Update React state and reset selections if deleted item was selected
+      setSubmissions(updatedSubmissions);
+      setSelectedPortalSubmissionIds(prev => prev.filter(selId => selId !== id));
+
+      setToast({
+        message: 'Submission has been permanently deleted.',
+        type: 'success'
+      });
+    } catch (err) {
+      console.error('Failed to perform single delete:', err);
+      alert('An error occurred during deletion.');
+    }
+  };
 
   if (!gatewayVerified) {
     return (
@@ -503,17 +654,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {isAdmin && (
-              <button
-                onClick={() => setIsAdminOpen(true)}
-                className="group flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold tracking-wide transition-all shadow-sm hover:shadow active:scale-95"
-                id="admin-dashboard-toggle-btn"
-              >
-                <Database className="w-3.5 h-3.5" />
-                <span>Admin Dashboard</span>
-                <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-400 group-hover:scale-125 transition-transform" />
-              </button>
-            )}
+            {/* Admin entry point completely hidden & disabled for a clean production experience */}
           </div>
         </div>
       </header>
@@ -598,19 +739,32 @@ export default function App() {
                           <h3 className="font-semibold text-base text-slate-950">Altera Executive Polo</h3>
                           <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Polo Version</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setZoomedImage('https://user.fm/files/v2-44d81f5f366006a3577f10f76786cf8b/Altera%20Polo.jpg');
-                            setZoomedImageTitle('Altera Executive Polo');
-                          }}
-                          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border border-slate-200 hover:border-slate-800 text-slate-500 hover:text-slate-900 transition-colors text-xs font-semibold cursor-pointer"
-                          id="zoom-polo-btn"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5" />
-                          <span>Click to expand</span>
-                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setZoomedImage('https://user.fm/files/v2-44d81f5f366006a3577f10f76786cf8b/Altera%20Polo.jpg');
+                              setZoomedImageTitle('Altera Executive Polo');
+                            }}
+                            className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg border border-slate-200 hover:border-slate-800 text-slate-500 hover:text-slate-900 transition-colors text-xs font-semibold cursor-pointer"
+                            id="zoom-polo-btn"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                            <span>Expand</span>
+                          </button>
+                          <a
+                            href="https://user.fm/files/v2-6d81b2bea73b0e8450582f05c14896c7/Polo.pdf"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-600 hover:text-indigo-700 transition-colors text-xs font-semibold cursor-pointer"
+                            id="size-guide-polo-btn"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Size Guide</span>
+                          </a>
+                        </div>
                       </div>
                     </motion.div>
 
@@ -644,19 +798,32 @@ export default function App() {
                           <h3 className="font-semibold text-base text-slate-950">Altera Pullover Hoodie</h3>
                           <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Hoodie Version</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setZoomedImage('https://user.fm/files/v2-a732a16d204d0d79d4a92ca2db026c24/Hoodie.jpg');
-                            setZoomedImageTitle('Altera Pullover Hoodie');
-                          }}
-                          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border border-slate-200 hover:border-slate-800 text-slate-500 hover:text-slate-900 transition-colors text-xs font-semibold cursor-pointer"
-                          id="zoom-hoodie-btn"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5" />
-                          <span>Click to expand</span>
-                        </button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setZoomedImage('https://user.fm/files/v2-a732a16d204d0d79d4a92ca2db026c20/Hoodie.jpg');
+                              setZoomedImageTitle('Altera Pullover Hoodie');
+                            }}
+                            className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg border border-slate-200 hover:border-slate-800 text-slate-500 hover:text-slate-900 transition-colors text-xs font-semibold cursor-pointer"
+                            id="zoom-hoodie-btn"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                            <span>Expand</span>
+                          </button>
+                          <a
+                            href="https://user.fm/files/v2-a4aec5b9ee53234878221d1bbdeb22aa/Hoodie.pdf"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg bg-teal-50 hover:bg-teal-100 border border-teal-100 text-teal-600 hover:text-teal-700 transition-colors text-xs font-semibold cursor-pointer"
+                            id="size-guide-hoodie-btn"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Size Guide</span>
+                          </a>
+                        </div>
                       </div>
                     </motion.div>
                   </div>
@@ -893,6 +1060,63 @@ export default function App() {
 
       {/* FOOTER */}
       <footer className="max-w-6xl mx-auto px-4 py-12 border-t border-slate-100 relative z-1 p-2">
+        {/* Inline Admin Portal passcode prompt widget */}
+        <AnimatePresence>
+          {showPortalAuth && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="mb-6 p-4 bg-slate-50 border border-slate-150 rounded-2xl max-w-sm ml-0 shadow-sm"
+              id="admin-passcode-inline-prompt"
+            >
+              <form onSubmit={handlePortalSubmit} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-slate-500" />
+                    Admin Passcode Required
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPortalAuth(false);
+                      setPortalPasscode('');
+                      setPortalAuthError(false);
+                    }}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/50 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Enter Hirsch passcode"
+                    value={portalPasscode}
+                    onChange={(e) => {
+                      setPortalPasscode(e.target.value);
+                      if (portalAuthError) setPortalAuthError(false);
+                    }}
+                    className="flex-1 px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-slate-900 placeholder:text-slate-400 focus:ring-1 focus:ring-slate-900 transition-all font-light"
+                    autoFocus
+                    id="portal-passcode-input"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl tracking-wide transition-all shadow-sm active:scale-95 cursor-pointer"
+                    id="portal-passcode-submit-btn"
+                  >
+                    Login
+                  </button>
+                </div>
+                {portalAuthError && (
+                  <p className="text-[11px] text-red-600 font-medium">Incorrect password. Please try again.</p>
+                )}
+              </form>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
             <img
@@ -902,28 +1126,20 @@ export default function App() {
               className="h-5 w-auto opacity-40 grayscale"
             />
             <span className="text-[10px] text-slate-400 tracking-wider uppercase font-medium">Altera Corp &copy; 2026</span>
+            <span className="text-slate-200 text-xs select-none">•</span>
+            <a
+              href="#"
+              onClick={(e) => {
+                handleAdminPortalClick(e);
+              }}
+              className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors cursor-pointer font-medium underline underline-offset-2"
+              id="admin-portal-trigger"
+            >
+              Admin Portal
+            </a>
           </div>
 
-          <div className="flex items-center gap-4 sm:gap-6">
-            <button
-              onClick={() => {
-                setTempScriptUrl(googleScriptUrl);
-                setIsScriptConfigOpen(true);
-              }}
-              className="text-xs text-slate-400 hover:text-slate-900 transition-colors flex items-center gap-1 cursor-pointer font-medium"
-              id="google-script-settings-btn"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              <span>Google Sheet Script</span>
-            </button>
-            <span className="h-3 w-px bg-slate-200" />
-            <button
-              onClick={() => setIsAdminOpen(true)}
-              className="text-xs text-slate-400 hover:text-slate-900 transition-colors flex items-center gap-1 cursor-pointer font-medium"
-            >
-              <Lock className="w-3 h-3" /> Management Console
-            </button>
-          </div>
+          {/* Management Console and Google Sheets buttons remove for clean lockdown */}
         </div>
       </footer>
 
@@ -1546,6 +1762,262 @@ export default function App() {
               </div>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Full-Screen Admin Portal Overlay Modal */}
+      <AnimatePresence>
+        {isAdminPortalOpen && (
+          <>
+            {/* Backdrop with blur */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[150]"
+            />
+
+            {/* Inner modal view */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 15 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed inset-0 sm:inset-6 bg-white sm:rounded-3xl shadow-2xl z-[160] overflow-hidden flex flex-col border border-slate-100"
+              id="admin-portal-modal-panel"
+            >
+              {/* Header */}
+              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-slate-900 text-white">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-display font-bold text-lg text-slate-950">Admin Portal Database</h3>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Local Storage Repositories & Order Specifications</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleDeleteSelectedPortal}
+                    disabled={selectedPortalSubmissionIds.length === 0}
+                    className="flex items-center gap-1.5 py-2 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-semibold tracking-wide transition-all shadow-sm hover:shadow active:scale-95 cursor-pointer"
+                    id="portal-delete-selected-btn"
+                  >
+                    <Trash className="w-4 h-4" />
+                    <span>Delete Selected ({selectedPortalSubmissionIds.length})</span>
+                  </button>
+
+                  <button
+                    onClick={exportToCSV}
+                    className="flex items-center gap-1.5 py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold tracking-wide transition-all shadow-sm hover:shadow active:scale-95 cursor-pointer"
+                    id="portal-export-csv-btn"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>Export to CSV</span>
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      setIsAdminPortalOpen(false);
+                      setPortalSearch('');
+                    }}
+                    className="p-2 bg-slate-200/60 hover:bg-slate-200 text-slate-500 hover:text-slate-950 rounded-xl transition-all cursor-pointer"
+                    id="portal-close-btn"
+                    title="Close Portal"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Toolbar/Insights bar */}
+              <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4 text-xs font-semibold text-slate-600">
+                  <span className="flex items-center gap-1.5 bg-slate-100 py-1.5 px-3 rounded-lg">
+                    Total Submissions: <strong className="text-slate-950 font-bold">{submissions.length}</strong>
+                  </span>
+                  <span className="flex items-center gap-1.5 bg-blue-50 text-blue-700 py-1.5 px-3 rounded-lg">
+                    Polos: <strong className="font-bold">{submissions.filter(s => s.item === 'polo').length}</strong>
+                  </span>
+                  <span className="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 py-1.5 px-3 rounded-lg">
+                    Hoodies: <strong className="font-bold">{submissions.filter(s => s.item === 'hoodie').length}</strong>
+                  </span>
+                </div>
+
+                {/* Inline Search Bar */}
+                <div className="relative w-full md:w-80">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search portal entries..."
+                    value={portalSearch}
+                    onChange={(e) => setPortalSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-slate-900 placeholder:text-slate-400 focus:ring-1 focus:ring-slate-900 transition-all font-light"
+                    id="portal-search-input"
+                  />
+                  {portalSearch && (
+                    <button
+                      onClick={() => setPortalSearch('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-[10px] font-bold animate-fade-in"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Submissions Table / Content */}
+              <div className="flex-1 overflow-auto p-6">
+                {submissions.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2 py-20">
+                    <Database className="w-10 h-10 text-slate-300" />
+                    <span className="text-sm font-medium">No submission records exist in the database.</span>
+                  </div>
+                ) : (() => {
+                  const items = submissions.filter(s => {
+                    const q = portalSearch.toLowerCase().trim();
+                    if (!q) return true;
+                    return (
+                      s.name.toLowerCase().includes(q) ||
+                      s.email.toLowerCase().includes(q) ||
+                      s.campus.toLowerCase().includes(q) ||
+                      s.item.toLowerCase().includes(q) ||
+                      s.size.toLowerCase().includes(q)
+                    );
+                  });
+
+                  if (items.length === 0) {
+                    return (
+                      <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2 py-20">
+                        <span className="text-sm">No entries match your search query.</span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="border border-slate-100 rounded-2xl overflow-hidden shadow-xs bg-white">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 uppercase tracking-wider font-bold">
+                              <th className="p-4 w-12 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={items.length > 0 && items.every(s => selectedPortalSubmissionIds.includes(s.id))}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedPortalSubmissionIds(prev => {
+                                        const visibleIds = items.map(s => s.id);
+                                        const combined = new Set([...prev, ...visibleIds]);
+                                        return Array.from(combined);
+                                      });
+                                    } else {
+                                      setSelectedPortalSubmissionIds(prev => {
+                                        const visibleIds = items.map(s => s.id);
+                                        return prev.filter(id => !visibleIds.includes(id));
+                                      });
+                                    }
+                                  }}
+                                  className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-950 cursor-pointer accent-slate-900"
+                                />
+                              </th>
+                              <th className="p-4 font-bold">Employee Name</th>
+                              <th className="p-4 font-bold">Corporate Email</th>
+                              <th className="p-4 font-bold">Campus / Location</th>
+                              <th className="p-4 font-bold">Garment Choice</th>
+                              <th className="p-4 font-bold text-center">Selected Size</th>
+                              <th className="p-4 font-bold text-right">Submission Date</th>
+                              <th className="p-4 font-bold text-center w-24">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {items.map((sub, idx) => {
+                              const isChecked = selectedPortalSubmissionIds.includes(sub.id);
+                              const row = {
+                                id: sub.id,
+                                employeeName: sub.name
+                              };
+                              return (
+                                <tr key={sub.id || idx} className={`hover:bg-slate-50/50 transition-colors ${isChecked ? 'bg-slate-50/60' : ''}`}>
+                                  <td className="p-4 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => {
+                                        setSelectedPortalSubmissionIds(prev => 
+                                          prev.includes(sub.id)
+                                            ? prev.filter(id => id !== sub.id)
+                                            : [...prev, sub.id]
+                                        );
+                                      }}
+                                      className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-950 cursor-pointer accent-slate-900"
+                                    />
+                                  </td>
+                                  <td className="p-4 font-semibold text-slate-900">{sub.name}</td>
+                                  <td className="p-4 text-slate-500 font-mono">{sub.email}</td>
+                                  <td className="p-4 text-slate-600 font-medium">
+                                    <span className="inline-flex items-center gap-1">
+                                      <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                                      {sub.campus}
+                                    </span>
+                                  </td>
+                                  <td className="p-4">
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-semibold text-[10px] ${
+                                      sub.item === 'polo' 
+                                        ? 'bg-blue-50 text-blue-700 border border-blue-105' 
+                                        : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                                    }`}>
+                                      <Shirt className="w-3 h-3" />
+                                      {sub.item === 'polo' ? 'Polo Shirt' : 'Pullover Hoodie'}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-center">
+                                    <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-semibold text-[11px] border border-slate-200">
+                                      {sub.size}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-right text-slate-400 font-mono text-[10px]">
+                                    {new Date(sub.timestamp).toLocaleString(undefined, {
+                                      year: 'numeric',
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}
+                                  </td>
+                                  <td className="p-4 text-center">
+                                    <button
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (window.confirm("Are you sure you want to delete this entry?")) {
+                                          const rawData = localStorage.getItem('altera_submissions_cache') || '[]';
+                                          const parsedData = JSON.parse(rawData) as ApparelSubmission[];
+                                          const updatedData = parsedData.filter(item => item.id !== row.id && item.name !== row.employeeName);
+                                          localStorage.setItem('altera_submissions_cache', JSON.stringify(updatedData));
+                                          setSubmissions(updatedData);
+                                        }
+                                      }}
+                                      className="p-1.5 text-rose-600 hover:text-rose-800 rounded-lg hover:bg-rose-50 transition-colors inline-flex items-center justify-center cursor-pointer"
+                                      title="Delete Submission"
+                                    >
+                                      <Trash className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

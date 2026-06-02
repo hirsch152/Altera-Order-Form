@@ -77,6 +77,13 @@ app.delete("/api/submissions/:id", (req, res) => {
 });
 
 app.delete("/api/submissions", (req, res) => {
+  const { ids } = req.body || {};
+  if (Array.isArray(ids)) {
+    let submissions = readSubmissions();
+    submissions = submissions.filter((s: any) => !ids.includes(s.id));
+    writeSubmissions(submissions);
+    return res.json({ success: true, count: ids.length });
+  }
   writeSubmissions([]);
   res.json({ success: true });
 });
