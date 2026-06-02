@@ -59,32 +59,7 @@ export default function App() {
   }, [toast]);
 
   // Gateway state definitions for Altera employee verification
-  const [gatewayVerified, setGatewayVerified] = useState<boolean>(() => {
-    return localStorage.getItem('altera_gateway_verified') === 'true';
-  });
-  const [gatewayEmail, setGatewayEmail] = useState('');
-  const [gatewayError, setGatewayError] = useState<string | null>(null);
-
-  const handleGatewaySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setGatewayError(null);
-    const emailLower = gatewayEmail.trim().toLowerCase();
-    
-    if (!emailLower) {
-      setGatewayError('Please enter your corporate email address.');
-      return;
-    }
-    
-    // Check if the email ends with '@altera.com'
-    if (emailLower.endsWith('@altera.com')) {
-      localStorage.setItem('altera_gateway_verified', 'true');
-      setGatewayVerified(true);
-      // Pre-fill the form submission email for convenience
-      setEmail(emailLower);
-    } else {
-      setGatewayError('Access restricted to Altera corporate email addresses.');
-    }
-  };
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   // App States
   const [submissions, setSubmissions] = useState<ApparelSubmission[]>([]);
@@ -533,7 +508,22 @@ export default function App() {
     }
   };
 
-  if (!gatewayVerified) {
+  const LoginGatekeeper = () => {
+    const [gateEmail, setGateEmail] = useState('');
+    const [gateError, setGateError] = useState<string | null>(null);
+
+    const handleVerify = (e: React.FormEvent) => {
+      e.preventDefault();
+      setGateError(null);
+      const emailLower = gateEmail.trim().toLowerCase();
+      if (!emailLower || !emailLower.endsWith('@altera.com')) {
+        setGateError('Access Restricted: A valid @altera.com corporate email is required.');
+        return;
+      }
+      setEmail(emailLower);
+      setIsAuthenticated(true);
+    };
+
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-slate-900 selection:text-white flex flex-col justify-between py-12 px-4 relative overflow-hidden">
         {/* Background ambient subtle visual circles */}
@@ -566,16 +556,16 @@ export default function App() {
               </motion.div>
               <div className="space-y-1.5">
                 <h2 className="font-display font-bold text-2xl tracking-tight text-slate-950">
-                  Employee Verification
+                  Altera Employee Verification
                 </h2>
                 <p className="text-xs text-slate-400 font-light leading-relaxed max-w-[280px] mx-auto">
-                  Please enter your corporate email to access the exclusive employee apparel portal.
+                  Please enter your corporate email address to access the apparel distribution portal.
                 </p>
               </div>
             </div>
 
             {/* Email form */}
-            <form onSubmit={handleGatewaySubmit} className="space-y-4">
+            <form onSubmit={handleVerify} className="space-y-4">
               <div className="space-y-2">
                 <label htmlFor="gateway-email-input" className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 pl-0.5">
                   <Mail className="w-3.5 h-3.5 text-slate-400" /> Corporate Email
@@ -584,14 +574,14 @@ export default function App() {
                   id="gateway-email-input"
                   type="email"
                   required
-                  placeholder="name@altera.com"
-                  value={gatewayEmail}
+                  placeholder="username@altera.com"
+                  value={gateEmail}
                   onChange={(e) => {
-                    setGatewayEmail(e.target.value);
-                    if (gatewayError) setGatewayError(null);
+                    setGateEmail(e.target.value);
+                    if (gateError) setGateError(null);
                   }}
                   className={`w-full px-4 py-3.5 bg-slate-50 border rounded-xl focus:outline-none focus:bg-white focus:ring-1 transition-all font-sans text-sm placeholder:text-slate-400 ${
-                    gatewayError
+                    gateError
                       ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500'
                       : 'border-slate-200 focus:border-slate-900 focus:ring-slate-900'
                   }`}
@@ -600,15 +590,15 @@ export default function App() {
 
               {/* Polite Error Messages */}
               <AnimatePresence mode="wait">
-                {gatewayError && (
+                {gateError && (
                   <motion.div
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
-                    className="text-xs text-rose-600 font-medium pl-0.5"
+                    className="text-xs text-rose-600 font-bold pl-0.5 text-left"
                     id="gateway-error-msg"
                   >
-                    {gatewayError}
+                    {gateError}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -617,9 +607,9 @@ export default function App() {
               <button
                 type="submit"
                 className="w-full h-12 rounded-xl bg-slate-900 hover:bg-slate-850 text-white font-semibold text-sm tracking-wide transition-all shadow-lg shadow-slate-900/10 hover:scale-[1.01] active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer mt-6"
-                id="gateway-enter-btn"
+                id="gateway-verify-btn"
               >
-                <span>Enter Portal</span>
+                <span>Verify & Enter</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
             </form>
@@ -632,9 +622,10 @@ export default function App() {
         </div>
       </div>
     );
-  }
+  };
 
-  return (
+  const MainApparelForm = () => {
+    return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-slate-900 selection:text-white">
       {/* Background ambient subtle visual circles */}
       <div className="absolute top-0 right-0 w-[45rem] h-[45rem] bg-gradient-to-b from-blue-10 w-1/2 blur-3xl opacity-50 pointer-events-none -mr-96 -mt-96" />
@@ -2021,5 +2012,12 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
-  );
+    );
+  };
+
+  if (!isAuthenticated) {
+    return <LoginGatekeeper />;
+  }
+
+  return <MainApparelForm />;
 }
