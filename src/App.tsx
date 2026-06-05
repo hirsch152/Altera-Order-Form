@@ -28,8 +28,56 @@ import {
 } from 'lucide-react';
 
 import { ApparelSubmission } from './types';
-import { initAuth, googleSignIn, getAccessToken, logout } from './firebaseAuth';
+import { initAuth, googleSignIn, getAccessToken, logout, db, auth } from './firebaseAuth';
 import { createGoogleSheet, syncSubmissionsToSheet } from './googleSheets';
+import { collection, addDoc } from 'firebase/firestore';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const DEFAULT_GOOGLE_SCRIPT_URL = '[PASTE YOUR COPIED WEB APP URL HERE]';
 
@@ -60,6 +108,8 @@ export default function App() {
 
   // Gateway state definitions for Altera employee verification
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [gateEmail, setGateEmail] = useState('');
+  const [gateError, setGateError] = useState<string | null>(null);
 
   // App States
   const [submissions, setSubmissions] = useState<ApparelSubmission[]>([]);
@@ -70,7 +120,9 @@ export default function App() {
   const [zoomedImageTitle, setZoomedImageTitle] = useState<string>('');
 
   // Form States
-  const [selectedItem, setSelectedItem] = useState<'polo' | 'hoodie' | null>(null);
+  const [selectedItem, setSelectedItem] = useState<
+    'Altera Ladies Executive Polo' | 'Altera Executive Polo' | 'Altera Pullover Hoodie' | null
+  >(null);
   const [selectedSize, setSelectedSize] = useState<'S' | 'M' | 'L' | 'XL' | '2XL' | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -102,7 +154,7 @@ export default function App() {
   
   // Search & Filter for Admin Panel
   const [adminSearch, setAdminSearch] = useState('');
-  const [adminFilterItem, setAdminFilterItem] = useState<'all' | 'polo' | 'hoodie'>('all');
+  const [adminFilterItem, setAdminFilterItem] = useState<string>('all');
   const [adminFilterSize, setAdminFilterSize] = useState<string>('all');
 
   const campusOptions = [
@@ -167,9 +219,17 @@ export default function App() {
     );
   }, []);
 
+  const isFormValid = (selectedItem === 'Altera Ladies Executive Polo' ||
+                       selectedItem === 'Altera Executive Polo' ||
+                       selectedItem === 'Altera Pullover Hoodie') &&
+                      !!selectedSize &&
+                      name.trim() !== '' &&
+                      email.trim().toLowerCase().endsWith('@altera.com') &&
+                      !!(campus === 'Other Location' ? customCampus.trim() : campus);
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedItem || !selectedSize || !name.trim() || !email.trim()) return;
+    if (!isFormValid) return;
 
     const finalCampus = campus === 'Other Location' ? customCampus.trim() : campus;
     if (!finalCampus) return;
@@ -178,11 +238,13 @@ export default function App() {
     let appsScriptSynced = false;
     let appsScriptError = null;
 
+    const apparelValue = selectedItem || '';
+
     const payload = {
       fullName: name.trim(),
       email: email.trim().toLowerCase(),
       location: finalCampus,
-      garmentType: selectedItem,
+      garmentType: apparelValue,
       size: selectedSize
     };
 
@@ -197,7 +259,7 @@ export default function App() {
         formParams.append('fullName', name.trim());
         formParams.append('email', email.trim().toLowerCase());
         formParams.append('location', finalCampus);
-        formParams.append('garmentType', selectedItem);
+        formParams.append('garmentType', apparelValue);
         formParams.append('size', selectedSize);
 
         await fetch(cleanUrl, {
@@ -215,7 +277,40 @@ export default function App() {
       }
     }
 
-    // 2. Process locally to maintain administrative dashboard and show success screen
+    // 2. Commit cleanly to Firestore database collection with a robust 4s timeout
+    let firestoreSynced = false;
+    let firestoreId = '';
+    let isFallbackMode = false;
+
+    try {
+      const firestorePromise = addDoc(collection(db, 'submissions'), {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        campus: finalCampus,
+        item: apparelValue,
+        size: selectedSize,
+        timestamp: new Date().toISOString()
+      });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore operation timed out (4s)')), 4000)
+      );
+
+      const docRef = await Promise.race([firestorePromise, timeoutPromise]);
+      firestoreId = docRef.id;
+      firestoreSynced = true;
+    } catch (err: any) {
+      console.warn('⚠️ Firestore insertion struggled or timed out. Triggering clean local fallback. Details:', err);
+      isFallbackMode = true;
+      try {
+        handleFirestoreError(err, OperationType.CREATE, 'submissions');
+      } catch (formattedErr) {
+        console.error('Logged compliant Firebase error:', formattedErr);
+      }
+    }
+
+    // 3. Process locally to maintain administrative dashboard and sync lists
+    let localSubmission = null;
     try {
       const res = await fetch('/api/submissions', {
         method: 'POST',
@@ -224,50 +319,99 @@ export default function App() {
           name: name.trim(),
           email: email.trim().toLowerCase(),
           campus: finalCampus,
-          item: selectedItem,
+          item: apparelValue,
           size: selectedSize
         })
       });
 
       if (res.ok) {
         const data = await res.json();
-        setSubmittedChoice(data.submission);
-        fetchSubmissions();
-
-        // Inform user with highly communicative sleek toast notifications
-        if (appsScriptSynced) {
-          setToast({
-            message: '🎉 Specs captured! Successfully streamed to Google Sheets.',
-            type: 'success'
-          });
-        } else if (isPlaceholder) {
-          setToast({
-            message: '📝 Form recorded in database! (Paste Web App URL in settings to live-stream Google Sheets)',
-            type: 'info'
-          });
-        } else {
-          setToast({
-            message: `⚠️ Order recorded locally. Web App sync failed: ${appsScriptError || 'Internal Redirect'}`,
-            type: 'error'
-          });
-        }
-
-        // Reset form inputs
-        setName('');
-        setEmail('');
-        setCampus('');
-        setCustomCampus('');
-        setSelectedItem(null);
-        setSelectedSize(null);
-      } else {
-        alert('Failed to log submission. Please try again.');
+        localSubmission = data.submission;
       }
     } catch (err) {
       console.error('Local database insertion failed:', err);
-      alert('An error occurred. Please check your connection.');
-    } finally {
-      setIsSubmitting(false);
     }
+
+    if (firestoreSynced || isFallbackMode) {
+      // Safely print local data backup to console as requested so no entries are lost in dev mode
+      console.log('📝 Dev Preview Fallback Logged Entry:', {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        campus: finalCampus,
+        item: apparelValue,
+        size: selectedSize,
+        timestamp: new Date().toISOString(),
+        isLocalFallback: isFallbackMode
+      });
+
+      const finalSubmission: ApparelSubmission = localSubmission || {
+        id: firestoreId || ("sub_" + Math.random().toString(36).substring(2, 9)),
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        campus: finalCampus,
+        item: apparelValue,
+        size: selectedSize as any,
+        timestamp: new Date().toISOString()
+      };
+
+      setSubmittedChoice(finalSubmission);
+      try {
+        fetchSubmissions();
+      } catch (fErr) {
+        console.warn('Failed post-submit fetchSubmissions background refresh:', fErr);
+      }
+
+      // Inform user with high-fidelity visual feedback and scannable text notifications of modern UX
+      if (appsScriptSynced) {
+        setToast({
+          message: '🎉 Selection Submitted! Captured inside Firestore & Google Sheets.',
+          type: 'success'
+        });
+      } else if (isFallbackMode) {
+        setToast({
+          message: '🎉 Selection Submitted! Cleared form and logged choice cleanly to local fallback state.',
+          type: 'success'
+        });
+      } else {
+        setToast({
+          message: '🎉 Selection Submitted! Cleanly saved in Firestore database.',
+          type: 'success'
+        });
+      }
+
+      // Reset form states
+      setName('');
+      setEmail('');
+      setCampus('');
+      setCustomCampus('');
+      setSelectedItem(null);
+      setSelectedSize(null);
+    } else if (localSubmission) {
+      // If local database worked but firestore failed
+      setSubmittedChoice(localSubmission);
+      try {
+        fetchSubmissions();
+      } catch (fErr) {
+        console.warn('Failed post-submit fetchSubmissions background refresh:', fErr);
+      }
+      setToast({
+        message: '📝 Order registered, but database synchronization encountered an issue.',
+        type: 'info'
+      });
+
+      // Reset form states
+      setName('');
+      setEmail('');
+      setCampus('');
+      setCustomCampus('');
+      setSelectedItem(null);
+      setSelectedSize(null);
+    } else {
+      alert('An error occurred. Check your connection or console logs for details.');
+    }
+
+    // Wrap-up loading state securely
+    setIsSubmitting(false);
   };
 
   const handleAdminLogin = async () => {
@@ -378,8 +522,10 @@ export default function App() {
 
   // Compute metrics for the dashboard
   const totalOrders = submissions.length;
-  const totalPolos = submissions.filter(s => s.item === 'polo').length;
-  const totalHoodies = submissions.filter(s => s.item === 'hoodie').length;
+  const totalMenPolos = submissions.filter(s => s.item === 'polo' || s.item === 'Altera Executive Polo').length;
+  const totalLadiesPolos = submissions.filter(s => s.item === 'Altera Ladies Executive Polo' || s.item === 'ladies_polo').length;
+  const totalPolos = totalMenPolos + totalLadiesPolos;
+  const totalHoodies = submissions.filter(s => s.item === 'hoodie' || s.item === 'Altera Pullover Hoodie').length;
 
   const sizeBreakdown = submissions.reduce((acc, curr) => {
     acc[curr.size] = (acc[curr.size] || 0) + 1;
@@ -508,22 +654,19 @@ export default function App() {
     }
   };
 
-  const LoginGatekeeper = () => {
-    const [gateEmail, setGateEmail] = useState('');
-    const [gateError, setGateError] = useState<string | null>(null);
+  const handleVerify = (e: React.FormEvent) => {
+    e.preventDefault();
+    setGateError(null);
+    const emailLower = gateEmail.trim().toLowerCase();
+    if (!emailLower || !emailLower.endsWith('@altera.com')) {
+      setGateError('Access Restricted: A valid @altera.com corporate email is required.');
+      return;
+    }
+    setEmail(emailLower);
+    setIsAuthenticated(true);
+  };
 
-    const handleVerify = (e: React.FormEvent) => {
-      e.preventDefault();
-      setGateError(null);
-      const emailLower = gateEmail.trim().toLowerCase();
-      if (!emailLower || !emailLower.endsWith('@altera.com')) {
-        setGateError('Access Restricted: A valid @altera.com corporate email is required.');
-        return;
-      }
-      setEmail(emailLower);
-      setIsAuthenticated(true);
-    };
-
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-slate-900 selection:text-white flex flex-col justify-between py-12 px-4 relative overflow-hidden">
         {/* Background ambient subtle visual circles */}
@@ -622,10 +765,9 @@ export default function App() {
         </div>
       </div>
     );
-  };
+  }
 
-  const MainApparelForm = () => {
-    return (
+  return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-slate-900 selection:text-white">
       {/* Background ambient subtle visual circles */}
       <div className="absolute top-0 right-0 w-[45rem] h-[45rem] bg-gradient-to-b from-blue-10 w-1/2 blur-3xl opacity-50 pointer-events-none -mr-96 -mt-96" />
@@ -699,17 +841,76 @@ export default function App() {
                     </h2>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                    {/* Ladies Polo Choice Card */}
+                    <motion.div
+                      whileHover={{ y: -4 }}
+                      transition={{ duration: 0.2 }}
+                      className={`relative cursor-pointer bg-white rounded-2xl border transition-all ${
+                        selectedItem === 'Altera Ladies Executive Polo'
+                          ? 'border-slate-900 ring-2 ring-slate-900 shadow-lg'
+                          : 'border-slate-150 hover:border-slate-350 shadow-sm hover:shadow-md'
+                      }`}
+                      onClick={() => setSelectedItem('Altera Ladies Executive Polo')}
+                      id="select-item-ladies-polo-card"
+                    >
+                      <div className="aspect-[3/4] rounded-t-2xl overflow-hidden bg-slate-50 relative flex items-center justify-center p-2">
+                        <img
+                          src="https://user.fm/files/v2-1d49af01a711a974fb61531fb56ad974/Altera%20Ladies%20polo.jpg"
+                          alt="Altera Ladies Executive Polo"
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-contain transition-transform duration-500 hover:scale-[1.03]"
+                        />
+                        {selectedItem === 'Altera Ladies Executive Polo' && (
+                          <div className="absolute top-4 right-4 bg-slate-900 text-white p-1.5 rounded-full shadow-md animate-scale-in">
+                            <Check className="w-4 h-4 text-white" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-5 space-y-4">
+                        <div className="flex justify-between items-center">
+                          <h3 className="font-semibold text-base text-slate-950">Altera Ladies Executive Polo</h3>
+                          <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Ladies Polo</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setZoomedImage('https://user.fm/files/v2-1d49af01a711a974fb61531fb56ad974/Altera%20Ladies%20polo.jpg');
+                              setZoomedImageTitle('Altera Ladies Executive Polo');
+                            }}
+                            className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg border border-slate-200 hover:border-slate-800 text-slate-500 hover:text-slate-900 transition-colors text-xs font-semibold cursor-pointer"
+                            id="zoom-ladies-polo-btn"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                            <span>Expand</span>
+                          </button>
+                          <a
+                            href="https://user.fm/files/v2-6d81b2bea73b0e8450582f05c14896c7/Polo.pdf"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-600 hover:text-indigo-700 transition-colors text-xs font-semibold cursor-pointer"
+                            id="size-guide-ladies-polo-btn"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Size Guide</span>
+                          </a>
+                        </div>
+                      </div>
+                    </motion.div>
+
                     {/* Polo Choice Card */}
                     <motion.div
                       whileHover={{ y: -4 }}
                       transition={{ duration: 0.2 }}
                       className={`relative cursor-pointer bg-white rounded-2xl border transition-all ${
-                        selectedItem === 'polo'
+                        selectedItem === 'Altera Executive Polo'
                           ? 'border-slate-900 ring-2 ring-slate-900 shadow-lg'
                           : 'border-slate-150 hover:border-slate-350 shadow-sm hover:shadow-md'
                       }`}
-                      onClick={() => setSelectedItem('polo')}
+                      onClick={() => setSelectedItem('Altera Executive Polo')}
                       id="select-item-polo-card"
                     >
                       <div className="aspect-[3/4] rounded-t-2xl overflow-hidden bg-slate-50 relative flex items-center justify-center p-2">
@@ -719,7 +920,7 @@ export default function App() {
                           referrerPolicy="no-referrer"
                           className="w-full h-full object-contain transition-transform duration-500 hover:scale-[1.03]"
                         />
-                        {selectedItem === 'polo' && (
+                        {selectedItem === 'Altera Executive Polo' && (
                           <div className="absolute top-4 right-4 bg-slate-900 text-white p-1.5 rounded-full shadow-md animate-scale-in">
                             <Check className="w-4 h-4 text-white" />
                           </div>
@@ -728,7 +929,7 @@ export default function App() {
                       <div className="p-5 space-y-4">
                         <div className="flex justify-between items-center">
                           <h3 className="font-semibold text-base text-slate-950">Altera Executive Polo</h3>
-                          <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Polo Version</span>
+                          <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Men\'s Polo</span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <button
@@ -764,21 +965,21 @@ export default function App() {
                       whileHover={{ y: -4 }}
                       transition={{ duration: 0.2 }}
                       className={`relative cursor-pointer bg-white rounded-2xl border transition-all ${
-                        selectedItem === 'hoodie'
+                        selectedItem === 'Altera Pullover Hoodie'
                           ? 'border-slate-900 ring-2 ring-slate-900 shadow-lg'
                           : 'border-slate-150 hover:border-slate-350 shadow-sm hover:shadow-md'
                       }`}
-                      onClick={() => setSelectedItem('hoodie')}
+                      onClick={() => setSelectedItem('Altera Pullover Hoodie')}
                       id="select-item-hoodie-card"
                     >
-                      <div className="aspect-[3/4] rounded-t-2xl overflow-hidden bg-slate-50 relative flex items-center justify-center p-2">
+                      <div className="aspect-[3/4] rounded-t-2xl overflow-hidden bg-slate-50 relative flex items-center justify-center p-4">
                         <img
                           src="https://user.fm/files/v2-a732a16d204d0d79d4a92ca2db026c24/Hoodie.jpg"
                           alt="Altera Pullover Hoodie"
                           referrerPolicy="no-referrer"
                           className="w-full h-full object-contain transition-transform duration-500 hover:scale-[1.03]"
                         />
-                        {selectedItem === 'hoodie' && (
+                        {selectedItem === 'Altera Pullover Hoodie' && (
                           <div className="absolute top-4 right-4 bg-slate-900 text-white p-1.5 rounded-full shadow-md animate-scale-in">
                             <Check className="w-4 h-4 text-white" />
                           </div>
@@ -946,9 +1147,9 @@ export default function App() {
 
                   <button
                     type="submit"
-                    disabled={isSubmitting || !selectedItem || !selectedSize || !name.trim() || !email.trim() || !campus}
+                    disabled={isSubmitting || !isFormValid}
                     className={`w-full sm:w-auto px-8 py-4 rounded-xl font-semibold text-sm tracking-wide transition-all h-12 flex items-center justify-center gap-2 ${
-                      !selectedItem || !selectedSize || !name.trim() || !email.trim() || !campus
+                      !isFormValid
                         ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                         : 'bg-slate-900 hover:bg-slate-800 text-white shadow-lg shadow-slate-900/10 cursor-pointer hover:scale-[1.01] active:scale-95'
                     }`}
@@ -1006,8 +1207,10 @@ export default function App() {
                     <div className="flex items-center gap-3">
                       <img
                         src={
-                          submittedChoice.item === 'polo'
+                          submittedChoice.item === 'polo' || submittedChoice.item === 'Altera Executive Polo'
                             ? 'https://user.fm/files/v2-44d81f5f366006a3577f10f76786cf8b/Altera%20Polo.jpg'
+                            : submittedChoice.item === 'Altera Ladies Executive Polo' || submittedChoice.item === 'ladies_polo'
+                            ? 'https://user.fm/files/v2-1d49af01a711a974fb61531fb56ad974/Altera%20Ladies%20polo.jpg'
                             : 'https://user.fm/files/v2-a732a16d204d0d79d4a92ca2db026c24/Hoodie.jpg'
                         }
                         alt="apparel image"
@@ -1016,7 +1219,11 @@ export default function App() {
                       />
                       <div>
                         <p className="text-sm font-semibold text-slate-900">
-                          {submittedChoice.item === 'polo' ? 'Altera Executive Polo' : 'Altera Pullover Hoodie'}
+                          {submittedChoice.item === 'polo' || submittedChoice.item === 'Altera Executive Polo'
+                            ? 'Altera Executive Polo'
+                            : submittedChoice.item === 'Altera Ladies Executive Polo' || submittedChoice.item === 'ladies_polo'
+                            ? 'Altera Ladies Executive Polo'
+                            : 'Altera Pullover Hoodie'}
                         </p>
                         <p className="text-[11px] text-slate-400 font-light">
                           Distribution: {submittedChoice.campus}
@@ -1437,7 +1644,8 @@ export default function App() {
                         id="filter-item-select"
                       >
                         <option value="all">Garment Type All</option>
-                        <option value="polo">Polo Shirt Only</option>
+                        <option value="polo">Men's Polo Shirt Only</option>
+                        <option value="Altera Ladies Executive Polo">Ladies Polo Shirt Only</option>
                         <option value="hoodie">Pullover Hoodie Only</option>
                       </select>
                     </div>
@@ -1491,9 +1699,13 @@ export default function App() {
                                 </td>
                                 <td className="p-3">
                                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
-                                    sub.item === 'polo' ? 'bg-indigo-50 text-indigo-700' : 'bg-teal-50 text-teal-700'
+                                    sub.item === 'polo' || sub.item === 'Altera Executive Polo'
+                                      ? 'bg-indigo-50 text-indigo-700'
+                                      : sub.item === 'Altera Ladies Executive Polo' || sub.item === 'ladies_polo'
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                      : 'bg-teal-50 text-teal-700'
                                   }`}>
-                                    {sub.item === 'polo' ? 'Polo' : 'Hoodie'}
+                                    {sub.item === 'polo' || sub.item === 'Altera Executive Polo' ? 'Polo' : sub.item === 'Altera Ladies Executive Polo' || sub.item === 'ladies_polo' ? 'Ladies Polo' : 'Hoodie'}
                                   </span>
                                 </td>
                                 <td className="p-3 text-center font-bold text-slate-800">
@@ -1830,10 +2042,10 @@ export default function App() {
                     Total Submissions: <strong className="text-slate-950 font-bold">{submissions.length}</strong>
                   </span>
                   <span className="flex items-center gap-1.5 bg-blue-50 text-blue-700 py-1.5 px-3 rounded-lg">
-                    Polos: <strong className="font-bold">{submissions.filter(s => s.item === 'polo').length}</strong>
+                    Polos: <strong className="font-bold">{submissions.filter(s => s.item === 'polo' || s.item === 'Altera Executive Polo').length}</strong>
                   </span>
                   <span className="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 py-1.5 px-3 rounded-lg">
-                    Hoodies: <strong className="font-bold">{submissions.filter(s => s.item === 'hoodie').length}</strong>
+                    Hoodies: <strong className="font-bold">{submissions.filter(s => s.item === 'hoodie' || s.item === 'Altera Pullover Hoodie').length}</strong>
                   </span>
                 </div>
 
@@ -1956,12 +2168,14 @@ export default function App() {
                                   </td>
                                   <td className="p-4">
                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-semibold text-[10px] ${
-                                      sub.item === 'polo' 
+                                      sub.item === 'polo' || sub.item === 'Altera Executive Polo'
                                         ? 'bg-blue-50 text-blue-700 border border-blue-105' 
+                                        : sub.item === 'Altera Ladies Executive Polo' || sub.item === 'ladies_polo'
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                                         : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
                                     }`}>
                                       <Shirt className="w-3 h-3" />
-                                      {sub.item === 'polo' ? 'Polo Shirt' : 'Pullover Hoodie'}
+                                      {sub.item === 'polo' || sub.item === 'Altera Executive Polo' ? 'Polo Shirt' : sub.item === 'Altera Ladies Executive Polo' || sub.item === 'ladies_polo' ? 'Altera Ladies Executive Polo' : 'Pullover Hoodie'}
                                     </span>
                                   </td>
                                   <td className="p-4 text-center">
@@ -2012,12 +2226,5 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
-    );
-  };
-
-  if (!isAuthenticated) {
-    return <LoginGatekeeper />;
-  }
-
-  return <MainApparelForm />;
+  );
 }

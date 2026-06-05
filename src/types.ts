@@ -3,7 +3,7 @@ export interface ApparelSubmission {
   name: string;
   email: string;
   campus: string;
-  item: 'polo' | 'hoodie';
+  item: string;
   size: 'S' | 'M' | 'L' | 'XL' | '2XL';
   timestamp: string;
 }

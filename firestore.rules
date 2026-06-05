@@ -1,0 +1,24 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isVerificationValid(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 150
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 150
+        && data.email.matches('.*@altera[.]com')
+        && data.campus is string && data.campus.size() > 0 && data.campus.size() <= 150
+        && data.item is string && data.item.size() > 0 && data.item.size() <= 150
+        && data.size is string && data.size.size() > 0 && data.size.size() <= 10
+        && data.timestamp is string && data.timestamp.size() > 0;
+    }
+
+    match /submissions/{submissionId} {
+      allow read, delete: if true;
+      allow create: if isVerificationValid(request.resource.data);
+      allow update: if isVerificationValid(request.resource.data);
+    }
+  }
+}

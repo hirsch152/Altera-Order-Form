@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "submission": {
+      "title": "Submission",
+      "description": "Apparel order submission by Altera employee",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of employee"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Corporate email of employee"
+        },
+        "campus": {
+          "type": "string",
+          "description": "Office campus location"
+        },
+        "item": {
+          "type": "string",
+          "description": "Apparel garment item selected"
+        },
+        "size": {
+          "type": "string",
+          "enum": ["S", "M", "L", "XL", "2XL"],
+          "description": "Apparel size selected"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["name", "email", "campus", "item", "size", "timestamp"]
+    }
+  },
+  "firestore": {
+    "submissions/{submissionId}": {
+      "schema": "submission",
+      "description": "Orders submitted by company employees"
+    }
+  }
+}
