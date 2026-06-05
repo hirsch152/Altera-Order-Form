@@ -229,6 +229,7 @@ export default function App() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Form submission initiated');
     if (!isFormValid) return;
 
     const finalCampus = campus === 'Other Location' ? customCampus.trim() : campus;
