@@ -121,7 +121,7 @@ export default function App() {
 
   // Form States
   const [selectedItem, setSelectedItem] = useState<
-    'Altera Ladies Executive Polo' | 'Altera Executive Polo' | 'Altera Pullover Hoodie' | null
+    "Women's Altera Executive Polo" | 'Altera Executive Polo' | 'Unisex Altera Pullover Hoodie' | null
   >(null);
   const [selectedSize, setSelectedSize] = useState<'S' | 'M' | 'L' | 'XL' | '2XL' | null>(null);
   const [name, setName] = useState('');
@@ -219,9 +219,9 @@ export default function App() {
     );
   }, []);
 
-  const isFormValid = (selectedItem === 'Altera Ladies Executive Polo' ||
+  const isFormValid = (selectedItem === "Women's Altera Executive Polo" ||
                        selectedItem === 'Altera Executive Polo' ||
-                       selectedItem === 'Altera Pullover Hoodie') &&
+                       selectedItem === 'Unisex Altera Pullover Hoodie') &&
                       !!selectedSize &&
                       name.trim() !== '' &&
                       email.trim().toLowerCase().endsWith('@altera.com') &&
@@ -524,9 +524,9 @@ export default function App() {
   // Compute metrics for the dashboard
   const totalOrders = submissions.length;
   const totalMenPolos = submissions.filter(s => s.item === 'polo' || s.item === 'Altera Executive Polo').length;
-  const totalLadiesPolos = submissions.filter(s => s.item === 'Altera Ladies Executive Polo' || s.item === 'ladies_polo').length;
+  const totalLadiesPolos = submissions.filter(s => s.item === "Women's Altera Executive Polo" || s.item === 'Altera Ladies Executive Polo' || s.item === 'ladies_polo').length;
   const totalPolos = totalMenPolos + totalLadiesPolos;
-  const totalHoodies = submissions.filter(s => s.item === 'hoodie' || s.item === 'Altera Pullover Hoodie').length;
+  const totalHoodies = submissions.filter(s => s.item === 'hoodie' || s.item === 'Altera Pullover Hoodie' || s.item === 'Unisex Altera Pullover Hoodie').length;
 
   const sizeBreakdown = submissions.reduce((acc, curr) => {
     acc[curr.size] = (acc[curr.size] || 0) + 1;
@@ -539,7 +539,11 @@ export default function App() {
       sub.email.toLowerCase().includes(adminSearch.toLowerCase()) ||
       sub.campus.toLowerCase().includes(adminSearch.toLowerCase());
     
-    const matchesItem = adminFilterItem === 'all' || sub.item === adminFilterItem;
+    const matchesItem = adminFilterItem === 'all' || 
+      (adminFilterItem === 'polo' && (sub.item === 'polo' || sub.item === 'Altera Executive Polo' || sub.item === "Men's Altera Executive Polo")) ||
+      ((adminFilterItem === 'Altera Ladies Executive Polo' || adminFilterItem === "Women's Altera Executive Polo") && (sub.item === 'Altera Ladies Executive Polo' || sub.item === "Women's Altera Executive Polo" || sub.item === 'ladies_polo')) ||
+      (adminFilterItem === 'hoodie' && (sub.item === 'hoodie' || sub.item === 'Altera Pullover Hoodie' || sub.item === 'Unisex Altera Pullover Hoodie')) ||
+      sub.item === adminFilterItem;
     const matchesSize = adminFilterSize === 'all' || sub.size === adminFilterSize;
 
     return matchesSearch && matchesItem && matchesSize;
@@ -848,21 +852,21 @@ export default function App() {
                       whileHover={{ y: -4 }}
                       transition={{ duration: 0.2 }}
                       className={`relative cursor-pointer bg-white rounded-2xl border transition-all ${
-                        selectedItem === 'Altera Ladies Executive Polo'
+                        selectedItem === "Women's Altera Executive Polo"
                           ? 'border-slate-900 ring-2 ring-slate-900 shadow-lg'
                           : 'border-slate-150 hover:border-slate-350 shadow-sm hover:shadow-md'
                       }`}
-                      onClick={() => setSelectedItem('Altera Ladies Executive Polo')}
+                      onClick={() => setSelectedItem("Women's Altera Executive Polo")}
                       id="select-item-ladies-polo-card"
                     >
                       <div className="aspect-[3/4] rounded-t-2xl overflow-hidden bg-slate-50 relative flex items-center justify-center p-2">
                         <img
                           src="https://user.fm/files/v2-1d49af01a711a974fb61531fb56ad974/Altera%20Ladies%20polo.jpg"
-                          alt="Altera Ladies Executive Polo"
+                          alt="Women's Altera Executive Polo"
                           referrerPolicy="no-referrer"
                           className="w-full h-full object-contain transition-transform duration-500 hover:scale-[1.03]"
                         />
-                        {selectedItem === 'Altera Ladies Executive Polo' && (
+                        {selectedItem === "Women's Altera Executive Polo" && (
                           <div className="absolute top-4 right-4 bg-slate-900 text-white p-1.5 rounded-full shadow-md animate-scale-in">
                             <Check className="w-4 h-4 text-white" />
                           </div>
@@ -870,8 +874,8 @@ export default function App() {
                       </div>
                       <div className="p-5 space-y-4">
                         <div className="flex justify-between items-center">
-                          <h3 className="font-semibold text-base text-slate-950">Altera Ladies Executive Polo</h3>
-                          <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Ladies Polo</span>
+                          <h3 className="font-semibold text-base text-slate-950">Women's Altera Executive Polo</h3>
+                          <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Women's Polo</span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <button
@@ -879,7 +883,7 @@ export default function App() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setZoomedImage('https://user.fm/files/v2-1d49af01a711a974fb61531fb56ad974/Altera%20Ladies%20polo.jpg');
-                              setZoomedImageTitle('Altera Ladies Executive Polo');
+                              setZoomedImageTitle("Women's Altera Executive Polo");
                             }}
                             className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg border border-slate-200 hover:border-slate-800 text-slate-500 hover:text-slate-900 transition-colors text-xs font-semibold cursor-pointer"
                             id="zoom-ladies-polo-btn"
@@ -929,7 +933,7 @@ export default function App() {
                       </div>
                       <div className="p-5 space-y-4">
                         <div className="flex justify-between items-center">
-                          <h3 className="font-semibold text-base text-slate-950">Altera Executive Polo</h3>
+                          <h3 className="font-semibold text-base text-slate-950">Men’s Altera Executive Polo</h3>
                           <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Men\'s Polo</span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
@@ -966,21 +970,21 @@ export default function App() {
                       whileHover={{ y: -4 }}
                       transition={{ duration: 0.2 }}
                       className={`relative cursor-pointer bg-white rounded-2xl border transition-all ${
-                        selectedItem === 'Altera Pullover Hoodie'
+                        selectedItem === 'Unisex Altera Pullover Hoodie'
                           ? 'border-slate-900 ring-2 ring-slate-900 shadow-lg'
                           : 'border-slate-150 hover:border-slate-350 shadow-sm hover:shadow-md'
                       }`}
-                      onClick={() => setSelectedItem('Altera Pullover Hoodie')}
+                      onClick={() => setSelectedItem('Unisex Altera Pullover Hoodie')}
                       id="select-item-hoodie-card"
                     >
                       <div className="aspect-[3/4] rounded-t-2xl overflow-hidden bg-slate-50 relative flex items-center justify-center p-4">
                         <img
                           src="https://user.fm/files/v2-a732a16d204d0d79d4a92ca2db026c24/Hoodie.jpg"
-                          alt="Altera Pullover Hoodie"
+                          alt="Unisex Altera Pullover Hoodie"
                           referrerPolicy="no-referrer"
                           className="w-full h-full object-contain transition-transform duration-500 hover:scale-[1.03]"
                         />
-                        {selectedItem === 'Altera Pullover Hoodie' && (
+                        {selectedItem === 'Unisex Altera Pullover Hoodie' && (
                           <div className="absolute top-4 right-4 bg-slate-900 text-white p-1.5 rounded-full shadow-md animate-scale-in">
                             <Check className="w-4 h-4 text-white" />
                           </div>
@@ -988,7 +992,7 @@ export default function App() {
                       </div>
                       <div className="p-5 space-y-4">
                         <div className="flex justify-between items-center">
-                          <h3 className="font-semibold text-base text-slate-950">Altera Pullover Hoodie</h3>
+                          <h3 className="font-semibold text-base text-slate-950">Unisex Altera Pullover Hoodie</h3>
                           <span className="text-[10px] bg-slate-100 text-slate-600 rounded px-2.5 py-1 font-bold uppercase tracking-wider">Hoodie Version</span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
@@ -997,7 +1001,7 @@ export default function App() {
                             onClick={(e) => {
                               e.stopPropagation();
                               setZoomedImage('https://user.fm/files/v2-a732a16d204d0d79d4a92ca2db026c20/Hoodie.jpg');
-                              setZoomedImageTitle('Altera Pullover Hoodie');
+                              setZoomedImageTitle('Unisex Altera Pullover Hoodie');
                             }}
                             className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg border border-slate-200 hover:border-slate-800 text-slate-500 hover:text-slate-900 transition-colors text-xs font-semibold cursor-pointer"
                             id="zoom-hoodie-btn"
@@ -1210,7 +1214,7 @@ export default function App() {
                         src={
                           submittedChoice.item === 'polo' || submittedChoice.item === 'Altera Executive Polo'
                             ? 'https://user.fm/files/v2-44d81f5f366006a3577f10f76786cf8b/Altera%20Polo.jpg'
-                            : submittedChoice.item === 'Altera Ladies Executive Polo' || submittedChoice.item === 'ladies_polo'
+                            : submittedChoice.item === "Women's Altera Executive Polo" || submittedChoice.item === 'Altera Ladies Executive Polo' || submittedChoice.item === 'ladies_polo'
                             ? 'https://user.fm/files/v2-1d49af01a711a974fb61531fb56ad974/Altera%20Ladies%20polo.jpg'
                             : 'https://user.fm/files/v2-a732a16d204d0d79d4a92ca2db026c24/Hoodie.jpg'
                         }
@@ -1222,9 +1226,9 @@ export default function App() {
                         <p className="text-sm font-semibold text-slate-900">
                           {submittedChoice.item === 'polo' || submittedChoice.item === 'Altera Executive Polo'
                             ? 'Altera Executive Polo'
-                            : submittedChoice.item === 'Altera Ladies Executive Polo' || submittedChoice.item === 'ladies_polo'
-                            ? 'Altera Ladies Executive Polo'
-                            : 'Altera Pullover Hoodie'}
+                            : submittedChoice.item === "Women's Altera Executive Polo" || submittedChoice.item === 'Altera Ladies Executive Polo' || submittedChoice.item === 'ladies_polo'
+                            ? "Women's Altera Executive Polo"
+                            : 'Unisex Altera Pullover Hoodie'}
                         </p>
                         <p className="text-[11px] text-slate-400 font-light">
                           Distribution: {submittedChoice.campus}
@@ -1646,7 +1650,7 @@ export default function App() {
                       >
                         <option value="all">Garment Type All</option>
                         <option value="polo">Men's Polo Shirt Only</option>
-                        <option value="Altera Ladies Executive Polo">Ladies Polo Shirt Only</option>
+                        <option value="Women's Altera Executive Polo">Women's Polo Shirt Only</option>
                         <option value="hoodie">Pullover Hoodie Only</option>
                       </select>
                     </div>
@@ -1702,11 +1706,11 @@ export default function App() {
                                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
                                     sub.item === 'polo' || sub.item === 'Altera Executive Polo'
                                       ? 'bg-indigo-50 text-indigo-700'
-                                      : sub.item === 'Altera Ladies Executive Polo' || sub.item === 'ladies_polo'
+                                      : sub.item === 'Altera Ladies Executive Polo' || sub.item === "Women's Altera Executive Polo" || sub.item === 'ladies_polo'
                                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                                       : 'bg-teal-50 text-teal-700'
                                   }`}>
-                                    {sub.item === 'polo' || sub.item === 'Altera Executive Polo' ? 'Polo' : sub.item === 'Altera Ladies Executive Polo' || sub.item === 'ladies_polo' ? 'Ladies Polo' : 'Hoodie'}
+                                    {sub.item === 'polo' || sub.item === 'Altera Executive Polo' ? 'Polo' : sub.item === 'Altera Ladies Executive Polo' || sub.item === "Women's Altera Executive Polo" || sub.item === 'ladies_polo' ? "Women's Polo" : 'Hoodie'}
                                   </span>
                                 </td>
                                 <td className="p-3 text-center font-bold text-slate-800">
@@ -2046,7 +2050,7 @@ export default function App() {
                     Polos: <strong className="font-bold">{submissions.filter(s => s.item === 'polo' || s.item === 'Altera Executive Polo').length}</strong>
                   </span>
                   <span className="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 py-1.5 px-3 rounded-lg">
-                    Hoodies: <strong className="font-bold">{submissions.filter(s => s.item === 'hoodie' || s.item === 'Altera Pullover Hoodie').length}</strong>
+                    Hoodies: <strong className="font-bold">{submissions.filter(s => s.item === 'hoodie' || s.item === 'Altera Pullover Hoodie' || s.item === 'Unisex Altera Pullover Hoodie').length}</strong>
                   </span>
                 </div>
 
@@ -2171,12 +2175,12 @@ export default function App() {
                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-semibold text-[10px] ${
                                       sub.item === 'polo' || sub.item === 'Altera Executive Polo'
                                         ? 'bg-blue-50 text-blue-700 border border-blue-105' 
-                                        : sub.item === 'Altera Ladies Executive Polo' || sub.item === 'ladies_polo'
+                                        : sub.item === 'Altera Ladies Executive Polo' || sub.item === "Women's Altera Executive Polo" || sub.item === 'ladies_polo'
                                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                                         : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
                                     }`}>
                                       <Shirt className="w-3 h-3" />
-                                      {sub.item === 'polo' || sub.item === 'Altera Executive Polo' ? 'Polo Shirt' : sub.item === 'Altera Ladies Executive Polo' || sub.item === 'ladies_polo' ? 'Altera Ladies Executive Polo' : 'Pullover Hoodie'}
+                                      {sub.item === 'polo' || sub.item === 'Altera Executive Polo' ? 'Polo Shirt' : sub.item === 'Altera Ladies Executive Polo' || sub.item === "Women's Altera Executive Polo" || sub.item === 'ladies_polo' ? "Women's Altera Executive Polo" : 'Unisex Altera Pullover Hoodie'}
                                     </span>
                                   </td>
                                   <td className="p-4 text-center">
