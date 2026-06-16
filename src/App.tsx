@@ -224,16 +224,14 @@ export default function App() {
                        selectedItem === 'Unisex Altera Pullover Hoodie') &&
                       !!selectedSize &&
                       name.trim() !== '' &&
-                      email.trim().toLowerCase().endsWith('@altera.com') &&
-                      !!(campus === 'Other Location' ? customCampus.trim() : campus);
+                      email.trim().toLowerCase().endsWith('@altera.com');
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log('Form submission initiated');
     if (!isFormValid) return;
 
-    const finalCampus = campus === 'Other Location' ? customCampus.trim() : campus;
-    if (!finalCampus) return;
+    const finalCampus = 'Not Specified';
 
     setIsSubmitting(true);
     let appsScriptSynced = false;
@@ -1103,43 +1101,6 @@ export default function App() {
                         onChange={(e) => setEmail(e.target.value)}
                         className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all font-sans text-sm placeholder:text-slate-400"
                       />
-                    </div>
-
-                    {/* Campus Location */}
-                    <div className="space-y-2 md:col-span-2">
-                      <label htmlFor="input-em-campus" className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5" /> Campus Location
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <select
-                          id="input-em-campus"
-                          required
-                          value={campus}
-                          onChange={(e) => setCampus(e.target.value)}
-                          className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all font-sans text-sm text-slate-800"
-                        >
-                          <option value="" disabled>Select your regional office campus...</option>
-                          {campusOptions.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
-
-                        {campus === 'Other Location' && (
-                          <motion.input
-                            initial={{ opacity: 0, x: 10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            type="text"
-                            required
-                            placeholder="Specify Campus Location..."
-                            value={customCampus}
-                            onChange={(e) => setCustomCampus(e.target.value)}
-                            className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900 transition-all font-sans text-sm placeholder:text-slate-400"
-                            id="custom-campus-input"
-                          />
-                        )}
-                      </div>
                     </div>
                   </div>
                 </div>
